@@ -1,278 +1,225 @@
-# Vault + Terraform + Demo EC2 — Full Walkthrough
+# Vault on EC2 — Full Walkthrough
 
 ## What This Does
 
+Terraform spins up a single EC2 instance on AWS. On first boot, the instance
+automatically installs Vault, initializes it, unseals it, and loads demo secrets.
+You just SSH in and play.
+
 ```
-Your Machine
-├── Vault (Docker)     ← stores secrets
-├── Terraform          ← manages Vault config + spins up EC2
-└── EC2 (AWS)          ← demo instance with Vault CLI pre-installed
+AWS
+└── EC2 (vault-demo)
+    ├── Vault server  (port 8200, file backend)
+    ├── Vault UI      (http://<ip>:8200)
+    └── Demo secrets  (secret/database, secret/my-app)
 ```
 
 ---
 
 ## Prerequisites
 
-| Tool | Install |
-|------|---------|
-| Docker + Docker Compose | https://docs.docker.com/get-docker |
-| Terraform >= 1.5 | `brew install terraform` or https://developer.hashicorp.com/terraform/install |
-| AWS CLI | `brew install awscli` |
-| AWS credentials | `aws configure` (needs EC2 + SG permissions) |
-| An EC2 key pair | Create one in AWS Console → EC2 → Key Pairs, download the `.pem` |
+| What | How |
+|------|-----|
+| Terraform >= 1.5 | https://developer.hashicorp.com/terraform/install |
+| AWS CLI configured | `aws configure` (needs EC2 + VPC + EIP permissions) |
+| EC2 key pair | AWS Console → EC2 → Key Pairs → Create → download `.pem` |
 
 ---
 
-## Part 1 — Start Vault Locally
-
-### Step 1: Start the Vault container
-
-```bash
-cd vault/
-docker compose up -d
-```
-
-Vault is now running at **http://127.0.0.1:8200** but is **sealed** (locked). You must initialize and unseal it.
-
-### Step 2: Initialize Vault
-
-```bash
-docker exec -it vault vault operator init
-```
-
-You will see output like this — **save it somewhere safe**:
-
-```
-Unseal Key 1: <key-1>
-Unseal Key 2: <key-2>
-Unseal Key 3: <key-3>
-Unseal Key 4: <key-4>
-Unseal Key 5: <key-5>
-
-Initial Root Token: hvs.XXXXXXXXXXXXXXXXXXXXXX
-```
-
-> Vault uses **Shamir's Secret Sharing** — you need 3 of 5 keys to unseal it.
-
-### Step 3: Unseal Vault (run 3 times with 3 different keys)
-
-```bash
-docker exec -it vault vault operator unseal <Unseal-Key-1>
-docker exec -it vault vault operator unseal <Unseal-Key-2>
-docker exec -it vault vault operator unseal <Unseal-Key-3>
-```
-
-After the third key you should see `Sealed: false`. Vault is now open.
-
-### Step 4: Log in to Vault
-
-```bash
-docker exec -it vault vault login <Initial-Root-Token>
-```
-
-Or open the UI at http://127.0.0.1:8200 and log in with the root token.
-
----
-
-## Part 2 — Run Terraform to Manage Secrets
-
-### Step 5: Create your tfvars file
+## Step 1 — Create your tfvars file
 
 ```bash
 cd terraform/
+
 cat > terraform.tfvars <<EOF
-vault_address = "http://127.0.0.1:8200"
-vault_token   = "hvs.XXXXXXXXXXXXXXXXXXXXXX"   # paste your root token here
-key_name      = "your-ec2-key-pair-name"       # name of your key pair in AWS
+key_name = "your-key-pair-name"
 EOF
 ```
 
-> `terraform.tfvars` is in `.gitignore` — your token will not be committed.
+That's the only required variable. Region defaults to `ap-southeast-1` and
+instance type defaults to `t3.micro`. Override if needed:
 
-### Step 6: Initialize Terraform
+```hcl
+# terraform.tfvars
+key_name      = "my-key"
+aws_region    = "us-east-1"   # optional
+instance_type = "t3.small"    # optional
+```
+
+---
+
+## Step 2 — Deploy
 
 ```bash
 terraform init
-```
-
-This downloads the `hashicorp/vault` and `hashicorp/aws` providers.
-
-### Step 7: Plan — see what Terraform will create
-
-```bash
-terraform plan
-```
-
-You should see it will:
-- Enable the KV v2 secrets engine at `secret/`
-- Write a database secret (`username`, `password`, `host`, `port`)
-- Launch a demo EC2 instance on AWS
-- Create a security group (SSH + HTTP)
-
-### Step 8: Apply
-
-```bash
 terraform apply
 ```
 
-Type `yes` when prompted. After ~2 minutes you will see:
+Type `yes`. Terraform will:
+- Launch an EC2 instance (Amazon Linux 2023)
+- Attach an Elastic IP (stable public IP)
+- Open ports 22 (SSH) and 8200 (Vault)
+
+After ~1 minute you'll see:
 
 ```
 Outputs:
-db_host     = "localhost"
-db_username = "admin"
-db_password = <sensitive>
-ec2_public_ip = "x.x.x.x"
-```
-
-To see the sensitive password:
-
-```bash
-terraform output -raw db_password
+ssh_command   = "ssh -i <your-key>.pem ec2-user@x.x.x.x"
+vault_ui_url  = "http://x.x.x.x:8200"
 ```
 
 ---
 
-## Part 3 — Explore Vault Directly
+## Step 3 — Wait for Vault to boot
 
-### Via CLI (from your machine)
+The EC2 takes **2–3 minutes** after Terraform finishes to fully bootstrap
+(install Vault, initialize, unseal, load demo data). You can watch the log:
 
 ```bash
-export VAULT_ADDR="http://127.0.0.1:8200"
-export VAULT_TOKEN="hvs.XXXXXXXXXXXXXXXXXXXXXX"
+# SSH in first
+ssh -i ~/path/to/your-key.pem ec2-user@<ip>
 
-# Check Vault health
-vault status
-
-# List all secrets engines
-vault secrets list
-
-# Read the database secret Terraform wrote
-vault kv get secret/database
-
-# Write your own secret
-vault kv put secret/my-app api_key="hello123" env="dev"
-
-# Read it back
-vault kv get secret/my-app
-
-# Read just one field
-vault kv get -field=api_key secret/my-app
-
-# List secrets at a path
-vault kv list secret/
-
-# Delete a secret
-vault kv delete secret/my-app
+# Then tail the bootstrap log
+sudo tail -f /var/log/userdata.log
 ```
 
-### Via the Web UI
-
-1. Open http://127.0.0.1:8200
-2. Log in with your root token
-3. Navigate to **Secrets → secret/** to browse KV secrets
-4. Click any secret to view, edit, or see its version history
+When you see `Bootstrap complete.` it's ready.
 
 ---
 
-## Part 4 — Play with the Demo EC2
-
-### Step 9: SSH into the EC2
+## Step 4 — Check what's on the EC2
 
 ```bash
-ssh -i ~/path/to/your-key.pem ec2-user@<ec2_public_ip>
+ls ~
+# vault-init.txt   ← unseal keys + root token (keep this safe)
+# vault-unseal.sh  ← run after any reboot to unseal Vault
+# vault-demo.sh    ← interactive walkthrough script
 ```
 
-> Get the IP from: `terraform output ec2_public_ip`
-
-### Step 10: Run the pre-loaded demo script
-
-The EC2 was bootstrapped with Vault CLI already installed and env vars set.
+Your shell already has the Vault env vars set:
 
 ```bash
-# The demo script walks through common Vault operations
+echo $VAULT_ADDR    # http://127.0.0.1:8200
+echo $VAULT_TOKEN   # your root token
+```
+
+---
+
+## Step 5 — Run the demo script
+
+```bash
 ./vault-demo.sh
 ```
 
-Or run commands manually:
-
-```bash
-# These env vars are already set on the EC2
-echo $VAULT_ADDR
-echo $VAULT_TOKEN
-
-vault status
-vault kv get secret/database
-vault kv put secret/from-ec2 message="Hello from EC2!"
-vault kv get secret/from-ec2
-```
-
-> **Note:** The EC2 connects to whatever `vault_address` you set in `terraform.tfvars`.
-> For the EC2 to reach your local Vault, you need to either:
-> - Use [ngrok](https://ngrok.com/) to expose port 8200: `ngrok http 8200`
-> - Or deploy Vault on a public server instead of Docker
+It walks through:
+1. Vault status
+2. List secrets engines
+3. Read the pre-loaded `secret/database`
+4. Read a single field (password)
+5. Write your own secret
+6. Update it (creates a new version)
+7. Read an older version
+8. List all secrets
+9. Delete the test secret
 
 ---
 
-## Part 5 — Experimenting Further
+## Step 6 — Open the Vault UI
 
-### Create a new KV secrets engine on a different path
+Take the `vault_ui_url` from the Terraform output and open it in your browser:
 
-```bash
-vault secrets enable -path=myapp kv-v2
-vault kv put myapp/config db_url="postgres://..." redis_url="redis://..."
-vault kv get myapp/config
+```
+http://x.x.x.x:8200
 ```
 
-### Create a read-only policy (least privilege)
+Log in with the **Token** method. Your root token is in `~/vault-init.txt`:
 
 ```bash
-# Write the policy
+cat ~/vault-init.txt | grep "Initial Root Token"
+```
+
+From the UI you can browse secrets, create policies, manage auth methods, and
+see version history — all visually.
+
+---
+
+## Hands-On Commands to Try
+
+```bash
+# Write a secret
+vault kv put secret/my-service db_url="postgres://..." port="5432"
+
+# Read it back
+vault kv get secret/my-service
+
+# Read just one field
+vault kv get -field=db_url secret/my-service
+
+# Update (new version is created automatically)
+vault kv put secret/my-service db_url="postgres://new-host/..."
+
+# See all versions
+vault kv metadata get secret/my-service
+
+# Read an old version
+vault kv get -version=1 secret/my-service
+
+# List everything under secret/
+vault kv list secret/
+
+# Delete a secret
+vault kv delete secret/my-service
+
+# Create a second secrets engine at a different path
+vault secrets enable -path=infra kv-v2
+vault kv put infra/aws access_key="AKIA..." region="ap-southeast-1"
+vault kv get infra/aws
+```
+
+---
+
+## Create a Policy (Least Privilege)
+
+```bash
+# Write a policy that allows read-only on secret/database
 vault policy write readonly-db - <<EOF
 path "secret/data/database" {
   capabilities = ["read"]
 }
 EOF
 
-# Create a token with only that policy
+# Create a token with that policy
 vault token create -policy="readonly-db"
 
-# Test it — this token can only read, not write
-VAULT_TOKEN=<new-token> vault kv get secret/database   # works
-VAULT_TOKEN=<new-token> vault kv put secret/database username="hacker"  # denied
+# Test it
+VAULT_TOKEN=<new-token> vault kv get secret/database    # works
+VAULT_TOKEN=<new-token> vault kv put secret/database x=1  # denied
 ```
 
-### See secret version history (KV v2)
+---
+
+## After a Reboot
+
+Vault is sealed on every restart (by design — it protects the data at rest).
+Run the unseal script:
 
 ```bash
-vault kv put secret/database username="admin" password="new-password"
-vault kv metadata get secret/database   # shows all versions
-vault kv get -version=1 secret/database # read the old version
+./vault-unseal.sh
 ```
+
+This replays 2 of your 3 unseal keys automatically.
 
 ---
 
 ## Cleanup
 
-### Destroy all Terraform resources (EC2, security group, Vault secrets)
-
 ```bash
+# From your local machine (not the EC2)
 cd terraform/
 terraform destroy
 ```
 
-### Stop Vault
-
-```bash
-cd ../vault/
-docker compose down
-```
-
-To also delete Vault's stored data:
-
-```bash
-docker compose down -v
-```
+This terminates the EC2, releases the Elastic IP, and removes the security group.
 
 ---
 
@@ -280,11 +227,13 @@ docker compose down -v
 
 | Action | Command |
 |--------|---------|
-| Start Vault | `cd vault && docker compose up -d` |
-| Unseal Vault | `docker exec -it vault vault operator unseal <key>` (×3) |
-| Terraform apply | `cd terraform && terraform apply` |
-| SSH to EC2 | `ssh -i key.pem ec2-user@$(terraform output -raw ec2_public_ip)` |
+| SSH in | `ssh -i key.pem ec2-user@<ip>` |
+| Run demo | `./vault-demo.sh` |
+| Vault status | `vault status` |
 | Read a secret | `vault kv get secret/<name>` |
 | Write a secret | `vault kv put secret/<name> key=value` |
-| Open Vault UI | http://127.0.0.1:8200 |
-| Destroy all | `terraform destroy` then `docker compose down` |
+| List secrets | `vault kv list secret/` |
+| Unseal after reboot | `./vault-unseal.sh` |
+| Open UI | `http://<ip>:8200` |
+| See root token | `cat ~/vault-init.txt` |
+| Destroy all | `terraform destroy` |

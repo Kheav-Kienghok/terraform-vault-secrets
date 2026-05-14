@@ -1,17 +1,9 @@
-output "db_username" {
-  value = data.vault_kv_secret_v2.db.data["username"]
+output "vault_ui_url" {
+  value       = "http://${aws_eip.vault.public_ip}:8200"
+  description = "Open this in your browser to access the Vault UI"
 }
 
-output "db_host" {
-  value = data.vault_kv_secret_v2.db.data["host"]
-}
-
-output "db_password" {
-  value     = data.vault_kv_secret_v2.db.data["password"]
-  sensitive = true
-}
-
-output "ec2_public_ip" {
-  value       = aws_instance.demo.public_ip
-  description = "SSH into the demo EC2: ssh -i <your-key>.pem ec2-user@<this-ip>"
+output "ssh_command" {
+  value       = "ssh -i <your-key>.pem ec2-user@${aws_eip.vault.public_ip}"
+  description = "Command to SSH into the Vault EC2"
 }

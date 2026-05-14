@@ -8,11 +8,12 @@ data "aws_ami" "amazon_linux" {
   }
 }
 
-resource "aws_security_group" "demo" {
+resource "aws_security_group" "vault" {
   name        = "vault-demo-sg"
-  description = "Allow SSH and HTTP for Vault demo EC2"
+  description = "Vault demo instance: SSH and Vault UI/API"
 
   ingress {
+    description = "SSH"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -20,8 +21,9 @@ resource "aws_security_group" "demo" {
   }
 
   ingress {
-    from_port   = 80
-    to_port     = 80
+    description = "Vault API and UI"
+    from_port   = 8200
+    to_port     = 8200
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -38,18 +40,22 @@ resource "aws_security_group" "demo" {
   }
 }
 
-resource "aws_instance" "demo" {
+resource "aws_instance" "vault" {
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.instance_type
   key_name               = var.key_name
-  vpc_security_group_ids = [aws_security_group.demo.id]
-
-  user_data = templatefile("${path.module}/userdata.sh.tpl", {
-    vault_address = var.vault_address
-    vault_token   = var.vault_token
-  })
+  vpc_security_group_ids = [aws_security_group.vault.id]
+  user_data              = file("${path.module}/userdata.sh")
 
   tags = {
-    Name = "vault-demo-ec2"
+    Name = "vault-demo"
+  }
+}
+
+resource "aws_eip" "vault" {
+  instance = aws_instance.vault.id
+
+  tags = {
+    Name = "vault-demo-eip"
   }
 }

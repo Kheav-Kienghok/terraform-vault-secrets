@@ -1,22 +1,14 @@
-variable "vault_address" {
-  type        = string
-  description = "Vault server URL"
-}
-
-variable "vault_token" {
-  type        = string
-  description = "Vault root token or Terraform token"
-  sensitive   = true
+variable "aws_region" {
+  type    = string
+  default = "ap-southeast-1"
 }
 
 variable "key_name" {
   type        = string
-  description = "Name of the AWS EC2 key pair for SSH access"
-  default     = ""
+  description = "Name of your EC2 key pair (create one in AWS Console → EC2 → Key Pairs)"
 }
 
 variable "instance_type" {
-  type        = string
-  description = "EC2 instance type"
-  default     = "t3.micro"
+  type    = string
+  default = "t3.micro"
 }
