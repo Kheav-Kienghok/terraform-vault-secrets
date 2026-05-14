@@ -22,28 +22,18 @@ AWS
 |------|-----|
 | Terraform >= 1.5 | https://developer.hashicorp.com/terraform/install |
 | AWS CLI configured | `aws configure` (needs EC2 + VPC + EIP permissions) |
-| EC2 key pair | AWS Console → EC2 → Key Pairs → Create → download `.pem` |
 
 ---
 
-## Step 1 — Create your tfvars file
+## Step 1 — (Optional) Create a tfvars file
 
-```bash
-cd terraform/
-
-cat > terraform.tfvars <<EOF
-key_name = "your-key-pair-name"
-EOF
-```
-
-That's the only required variable. Region defaults to `ap-southeast-1` and
-instance type defaults to `t3.micro`. Override if needed:
+No required variables — Terraform generates the SSH key for you. Override
+region or instance type if needed:
 
 ```hcl
 # terraform.tfvars
-key_name      = "my-key"
-aws_region    = "us-east-1"   # optional
-instance_type = "t3.small"    # optional
+aws_region    = "us-east-1"   # default: ap-southeast-1
+instance_type = "t3.small"    # default: t3.micro
 ```
 
 ---
@@ -56,7 +46,8 @@ terraform apply
 ```
 
 Type `yes`. Terraform will:
-- Launch an EC2 instance (Amazon Linux 2023)
+- Generate an SSH key pair and save the private key to `secret/vault-demo.pem`
+- Launch an EC2 instance (Ubuntu 24.04, 20 GB disk)
 - Attach an Elastic IP (stable public IP)
 - Open ports 22 (SSH) and 8200 (Vault)
 
@@ -64,7 +55,7 @@ After ~1 minute you'll see:
 
 ```
 Outputs:
-ssh_command   = "ssh -i <your-key>.pem ec2-user@x.x.x.x"
+ssh_command   = "ssh -i <your-key>.pem ubuntu@x.x.x.x"
 vault_ui_url  = "http://x.x.x.x:8200"
 ```
 
@@ -77,7 +68,7 @@ The EC2 takes **2–3 minutes** after Terraform finishes to fully bootstrap
 
 ```bash
 # SSH in first
-ssh -i ~/path/to/your-key.pem ec2-user@<ip>
+ssh -i ~/path/to/your-key.pem ubuntu@<ip>
 
 # Then tail the bootstrap log
 sudo tail -f /var/log/userdata.log
@@ -227,7 +218,7 @@ This terminates the EC2, releases the Elastic IP, and removes the security group
 
 | Action | Command |
 |--------|---------|
-| SSH in | `ssh -i key.pem ec2-user@<ip>` |
+| SSH in | `ssh -i key.pem ubuntu@<ip>` |
 | Run demo | `./vault-demo.sh` |
 | Vault status | `vault status` |
 | Read a secret | `vault kv get secret/<name>` |
