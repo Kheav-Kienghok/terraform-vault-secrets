@@ -68,14 +68,13 @@ vault operator unseal "$UNSEAL_2"
 export VAULT_TOKEN="$ROOT_TOKEN"
 
 # -------------------------------------------------------
-# 6. Set env vars for ubuntu user
+# 6. Set env vars system-wide (all users, all shells)
 # -------------------------------------------------------
-cat >> /home/ubuntu/.bashrc <<ENVEOF
-
-# Vault
+cat > /etc/profile.d/vault.sh <<ENVEOF
 export VAULT_ADDR=http://127.0.0.1:8200
 export VAULT_TOKEN=$ROOT_TOKEN
 ENVEOF
+chmod +x /etc/profile.d/vault.sh
 
 # -------------------------------------------------------
 # 7. Load demo secrets
@@ -100,7 +99,7 @@ vault kv put secret/my-app \
 # vault-unseal.sh — run after EC2 reboots
 cat > /home/ubuntu/vault-unseal.sh <<UNSEALEOF
 #!/bin/bash
-export VAULT_ADDR=http://127.0.0.1:8200
+source /etc/profile.d/vault.sh
 vault operator unseal $UNSEAL_1
 vault operator unseal $UNSEAL_2
 echo "Vault is unsealed."
