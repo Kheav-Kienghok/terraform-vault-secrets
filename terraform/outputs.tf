@@ -4,6 +4,6 @@ output "vault_ui_url" {
 }
 
 output "ssh_command" {
-  value       = "ssh -i <your-key>.pem ec2-user@${aws_eip.vault.public_ip}"
+  value       = "ssh -i ../secret/vault-demo.pem ec2-user@${aws_eip.vault.public_ip}"
   description = "Command to SSH into the Vault EC2"
 }

@@ -43,7 +43,7 @@ resource "aws_security_group" "vault" {
 resource "aws_instance" "vault" {
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.instance_type
-  key_name               = var.key_name
+  key_name               = aws_key_pair.vault.key_name
   vpc_security_group_ids = [aws_security_group.vault.id]
   user_data              = file("${path.module}/userdata.sh")
 
